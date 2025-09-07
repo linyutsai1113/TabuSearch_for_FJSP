@@ -3,7 +3,10 @@
 
 class Move:
     """
-    代表一個鄰域移動操作。
+    Represents a move operation in the Tabu Search algorithm.
+    Attributes:
+    - op_id: ID of the operation being moved
+    - target_machine_id: ID of the target machine
     """
     def __init__(self, op_id, target_machine_id, new_pos):
         self.op_id = op_id

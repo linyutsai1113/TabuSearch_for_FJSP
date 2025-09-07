@@ -30,7 +30,7 @@ class _DirectedGraph:
         in_degrees = {node: 0 for node in self.__nodes}
         for node_list in self.__adjacency.values():
             for adj_node in node_list:
-                in_degrees[adj_node] += 1
+                in_degrees[adj_node] += 1 
         
         queue = deque([node for node, degree in in_degrees.items() if degree == 0])
         res = []
@@ -61,7 +61,9 @@ class _DirectedGraph:
         3. return the longest path lengths. or None if graph has cycles.
         """
         sorted_nodes = self.topological_sort()
+
         if not sorted_nodes:
+            #print("Graph has cycles when calculating longest paths!")
             return None # graph has cycles
 
         dist = {node: float('-inf') for node in self.__nodes}
@@ -183,6 +185,7 @@ class DisjunctiveGraph:
         r_times_raw = forward_graph.calculate_all_longest_paths(self.source, weight_func)
 
         if r_times_raw is None: # graph has cycles
+            #print("Graph has cycles when calculating release times!")
             self.makespan = float('inf')
             return self.makespan
         
@@ -199,6 +202,7 @@ class DisjunctiveGraph:
         q_times_raw = reverse_graph.calculate_all_longest_paths(self.sink, rev_weight_func)
         
         if q_times_raw is None: # graph has cycles
+            #print("Graph has cycles when calculating delivery times!")
             self.makespan = float('inf')
             return self.makespan
 

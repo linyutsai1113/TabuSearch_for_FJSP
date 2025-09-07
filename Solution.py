@@ -6,7 +6,7 @@ from MJSProblem import Job, Operation
 
 class Solution:
     """
-    封裝一個排程解，即工序在各機器上的排列。
+    Packaging a schedule solution, i.e., the arrangement of operations on machines.
     """
     def __init__(self, schedule_dict):
         # schedule_dict: {machine_id: [op_id_1, op_id_2, ...]}
@@ -20,9 +20,15 @@ class Solution:
 
 def generate_initial_solution(jobs, num_machines):
     """
-    生成一個初始解，保留 FIFO 精神並加入啟發式規則。
-    採用基於事件驅動的模擬，選擇下一個能最早開始的工序 (FCFS/FIFO)。
-    如果有多個工序能同時開始，則選擇處理時間最短的 (SPT) 作為決勝規則。
+    Purpose: gnerate an initial solution using a heuristic method. (FIFO + SPT)
+    Input: 
+    - jobs: list of Job objects
+    - num_machines: number of machines
+    Output: Solution object
+    Logic:
+    1. Machine assignment: assign each operation to a machine to balance workloads.
+    2. Scheduling: use earliest start time (FIFO) as the primary rule, and shortest processing time (SPT) as the tie-breaker.
+    Note: This is a simple heuristic and can be improved. Also, the initial solution quality may affect the Tabu Search performance. should be a feasible solution.
     """
     operations = [op for job in jobs for op in job.operations]
     
@@ -43,7 +49,6 @@ def generate_initial_solution(jobs, num_machines):
     machine_avail_time = {m: 0 for m in range(1, num_machines + 1)}
     # tracking each operation's completion time
     op_completion_time = {}
-    
     # tracking next operation index to schedule for each job
     next_op_idx = {job.id: 0 for job in jobs}
     
@@ -70,8 +75,8 @@ def generate_initial_solution(jobs, num_machines):
             break
 
         # heuristic selection rule:
-        # 1. 主要排序：按最早開始時間 (est) 升序 (FIFO)
-        # 2. 次要排序：按處理時間 (SPT) 升序
+        # 1. main sort: by earliest start time (est) ascending (FIFO)
+        # 2. secondary sort: by shortest processing time (SPT) ascending
         best_candidate = min(candidates, key=lambda c: (c['est'], c['op'].get_processing_time()))
         
         op_to_schedule = best_candidate['op']

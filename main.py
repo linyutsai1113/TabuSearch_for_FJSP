@@ -8,9 +8,11 @@ from TabuSearch import TabuSearchSolver
 
 def parse_jssp_instance(filepath):
     """
-    Purpose: 解析 JSSP 問題實例文件，返回作業列表和機器數量。
-    Input: filepath - 問題實例文件的路徑
-    Output: jobs - 作業列表 (每個作業包含其工序), num_machines - 機器數量
+    Purpose: Parse a JSSP instance file.
+    Input: filepath - path to the instance file
+    Output: 
+    - jobs - list of Job objects
+    - num_machines - number of machines
     Note: Example for JSSP instance
     
     #+++++++++++++++++++++++++++++
@@ -37,12 +39,12 @@ def parse_jssp_instance(filepath):
 
     jobs = []
 
-    # 解析每個作業的工序
+    # parse operations for each job
     for job_index, line in enumerate(lines[5:5 + num_jobs]):
         tokens = list(map(int, line.strip().split()))
         operations = []
         for op_index in range(0, len(tokens), 2):
-            machine_id = tokens[op_index] + 1  # 轉為 1-indexed
+            machine_id = tokens[op_index] + 1  # Convert to 1-indexed
             processing_time = tokens[op_index + 1]
             op_id = f"{job_index + 1}-{op_index // 2 + 1}"
 
@@ -66,20 +68,20 @@ def main():
     """
     print("--- Setting a Problem instance ---")
 
-    jobs, num_machines = parse_jssp_instance('git-repos/jsp_framework/jsp/benchmark/instances/la02')
+    jobs, num_machines = parse_jssp_instance('git-repos/jsp_framework/jsp/benchmark/instances/la04')
     print(f"Instance define completed: {len(jobs)} jobs, {num_machines} machines.")
 
-    # 產生初始解
+    # generate an initial solution
     print("\n--- Generating a initial solution ---")
     initial_solution = generate_initial_solution(jobs, num_machines)
-    print("Initial solution:")
+    print("\nInitial solution:")
     for m_id, ops in initial_solution.schedule.items():
         print(f"  Machine {m_id}: {ops}")
 
+    # run Tabu Search
+    solver = TabuSearchSolver(jobs, num_machines, max_iter_no_improve=1000)
     
-    
-    # 建立並運行求解器
-    solver = TabuSearchSolver(jobs, num_machines, max_iter_no_improve=200)
+    # measure time
     start_time = time.time()
     best_solution, best_makespan = solver.solve(initial_solution, max_iterations=1000)
     end_time = time.time()
