@@ -83,7 +83,7 @@ class TabuSearchSolver:
                     int(1.2 * self.tabu_list_base_size)
                 )
 
-            best_move_info = self.find_best_neighbor_move(current_solution, i)
+            best_move_info = self.find_best_neighbor_move(current_solution, i, iter_since_best)
             
             if best_move_info is None:
                 iter_since_best += 1
@@ -106,7 +106,7 @@ class TabuSearchSolver:
 
             # check for cycles (makespan == inf indicates a cycle in this implementation) goback to previous solution if cycle detected
             if current_makespan == float('inf'):
-                print(f"Iter. {i+1}: found cycles exist! Withdraw move: {move}")
+                #print(f"Iter. {i+1}: found cycles exist! Withdraw move: {move}")
                 current_solution = solution_before_move
                 self.graph.build_graph_from_solution(current_solution) 
                 current_makespan = self.graph.calculate_makespan() 
@@ -114,7 +114,7 @@ class TabuSearchSolver:
                 
                 # add the move that caused the cycle to the tabu list
                 pred_j_id = solution_before_move.schedule[move.target_machine_id][move.new_pos - 1] if move.new_pos > 0 else None
-                self.tabu_list[(move.op_id, pred_j_id)] = i + self.tabu_list_size * 2 # for longer tabu tenure
+                self.tabu_list[(move.op_id, pred_j_id)] = i + self.tabu_list_size * 2
                 continue 
 
             # Update the tabu list (using the third type suggested in the paper)
@@ -141,7 +141,7 @@ class TabuSearchSolver:
         print("\n--- Tabu Search End ---")
         return best_solution, best_makespan
 
-    def find_best_neighbor_move(self, current_solution, current_iter):
+    def find_best_neighbor_move(self, current_solution, current_iter, iter_since_best):
         critical_ops = self.graph.critical_path
         
         if not critical_ops:
@@ -179,12 +179,12 @@ class TabuSearchSolver:
                     j_op = self.graph.op_map.get(pred_j_id) if pred_j_id else self.graph.source
                     k_op = self.graph.op_map.get(machine_schedule[pos]) if pos < len(machine_schedule) else self.graph.sink
                     
-                    # 檢查前置條件: j != f(i) and k != p(i)
+                    # before check: j != f(i) and k != p(i)
                     if f_op and j_op.id == f_op.id: continue
                     if p_op and k_op.id == p_op.id: continue
 
                     is_feasible = True
-                    # if (1): r_j < r_f(i) + p_f(i)
+                    # check if (1): r_j < r_f(i) + p_f(i)
                     if f_op:
                         r_j = self.graph.release_times.get(j_op.id, 0)
                         r_f = self.graph.release_times.get(f_op.id, 0)
@@ -192,7 +192,7 @@ class TabuSearchSolver:
                         if not (r_j < r_f + p_f):
                             is_feasible = False
                     
-                    # if (2): r_k + p_k > r_p(i)
+                    # check if (2): r_k + p_k > r_p(i)
                     if is_feasible and p_op:
                         r_k = self.graph.release_times.get(k_op.id, 0)
                         p_k = k_op.get_processing_time() if k_op.id != 'sink' else 0
@@ -226,61 +226,118 @@ class TabuSearchSolver:
 
                     moves_by_rank[rank].append({'move': move, 'lb': final_lb})
 
-
+        
         # from the best rank, select the move with the lowest lower bound
+        #for rank in sorted(moves_by_rank.keys()):
+        #    print(f"Rank {rank}: {len(moves_by_rank[rank])} moves")
+
+        stagnation_threshold = self.max_iter_no_improve / 3.0
+        p_explore_base = min(0.8, iter_since_best / stagnation_threshold if stagnation_threshold > 0 else 0)
+
+
+        # There are some different form paper, in origin paper we choose the move from sorted rank 1-5 the top one
+        # but her I use the different strategy to avoid stunk in local optimal.
+        for rank in sorted(moves_by_rank.keys()):
+            if moves_by_rank[rank]:
+                p_skip_rank = 0
+                if rank == 1 or rank == 2: 
+                    p_skip_rank = p_explore_base / 2 
+                elif rank == 3 or rank == 4: 
+                    p_skip_rank = p_explore_base / 4 
+                
+                if p_skip_rank > 0 and random.random() < p_skip_rank:
+                    # print(f"Stuck for {iter_since_best}. Probabilistically SKIPPING rank {rank} (p={p_skip_rank:.2f})...")
+                    continue # skip current Rank, jump to the next
+
+                
+                # only if we stuck in this solution, we enable the explore inside the rank 
+                # as longer you stuck, with higher probability random choose
+                p_random_choice_in_rank = p_explore_base
+                
+                if random.random() < p_random_choice_in_rank: # explore: from current Rank random choose a move
+                    # print(f"Stuck for {iter_since_best}. Probabilistically CHOOSING RANDOM from rank {rank} (p={p_random_choice_in_rank:.2f})...")
+                    return random.choice(moves_by_rank[rank])
+                else:
+                    # otherwise choose the best move (smallest LB)
+                    return min(moves_by_rank[rank], key=lambda x: x['lb'])
+        
         for rank in sorted(moves_by_rank.keys()):
             if moves_by_rank[rank]:
                 return min(moves_by_rank[rank], key=lambda x: x['lb'])
+                
         return None
 
-    def estimate_move_makespan(self, op_to_move, target_machine_id, new_pos, solution):
+    def estimate_move_makespan(self, op_i, target_machine_id, new_pos, solution):
         r, q = self.graph.release_times, self.graph.delivery_times
-        p_op, f_op = op_to_move.job_prev, op_to_move.job_next
+        op_map = self.graph.op_map
+
+        def get_safe_proc_time(op):
+            return op.get_processing_time() if op and op.id not in ['source', 'sink'] else 0
+
+        p_i_prime = op_i.processing_times[target_machine_id]
         
+        op_p_i = op_i.job_prev
+        op_f_i = op_i.job_next
+
         schedule_on_target = solution.schedule[target_machine_id]
-        j_op_id = schedule_on_target[new_pos - 1] if new_pos > 0 else 'source'
-        k_op_id = schedule_on_target[new_pos] if new_pos < len(schedule_on_target) else 'sink'
+        op_j = op_map[schedule_on_target[new_pos - 1]] if new_pos > 0 else self.graph.source
+        op_k = op_map[schedule_on_target[new_pos]] if new_pos < len(schedule_on_target) else self.graph.sink
+
+        original_schedule = solution.schedule[op_i.machine_id]
+        op_idx = original_schedule.index(op_i.id)
+        op_s = op_map[original_schedule[op_idx - 1]] if op_idx > 0 else self.graph.source
+        op_t = op_map[original_schedule[op_idx + 1]] if op_idx < len(original_schedule) - 1 else self.graph.sink
+
+        #  LB1 (Theorem 5) 
         
-        j_op = self.graph.op_map.get(j_op_id)
-        k_op = self.graph.op_map.get(k_op_id)
-        p_i_prime = op_to_move.processing_times[target_machine_id]
+        # r_{p(i)} + p_{p(i)} and q_{f(i)} + p_{f(i)}
+        r_p_term = (r.get(op_p_i.id, 0) + get_safe_proc_time(op_p_i)) if op_p_i else 0
+        q_f_term = (q.get(op_f_i.id, 0) + get_safe_proc_time(op_f_i)) if op_f_i else 0
         
-        # --- Theorem 4 (Section 6.3) ---
-        r_p_term = (r.get(p_op.id, 0) + p_op.get_processing_time()) if p_op else 0
-        r_j_term = (r.get(j_op.id, 0) + j_op.get_processing_time()) if j_op_id != 'source' else 0
-        q_f_term = (q.get(f_op.id, 0) + f_op.get_processing_time()) if f_op else 0
-        q_k_term = (q.get(k_op.id, 0) + k_op.get_processing_time()) if k_op_id != 'sink' else 0
-        theorem4_value = max(r_p_term, r_j_term) + p_i_prime + max(q_f_term, q_k_term)
-        # get op_to_move's predecessor and successor on its original machine (s, t)
-        machine_ops = solution.schedule[op_to_move.machine_id]
-        op_idx = machine_ops.index(op_to_move.id)
-        s_op = self.graph.op_map[machine_ops[op_idx - 1]] if op_idx > 0 else self.graph.source
-        t_op = self.graph.op_map[machine_ops[op_idx + 1]] if op_idx < len(machine_ops) - 1 else self.graph.sink
+        r_hat_j = r.get(op_j.id, 0)
+        if op_j.id != 'source' and self.graph.path_exists(op_i, op_j):
+            r_t = r.get(op_t.id, 0)
+            
+            op_p_t = op_t.job_prev
+            # r̃_{p(t)} + p_{p(t)}
+            r_tilde_p_t_term = (r.get(op_p_t.id, 0) + get_safe_proc_time(op_p_t)) if op_p_t else 0
+            # r̃_s + p_s
+            r_tilde_s_term = r.get(op_s.id, 0) + get_safe_proc_time(op_s)
+            
+            r_tilde_t = max(r_tilde_p_t_term, r_tilde_s_term)
+            r_hat_j = r.get(op_j.id, 0) - r_t + r_tilde_t
+
+        q_hat_k = q.get(op_k.id, 0)
+
+        if op_k.id != 'sink' and self.graph.path_exists(op_k, op_i):
+            q_s = q.get(op_s.id, 0)
+
+            op_f_s = op_s.job_next
+            # q̃_{f(s)} + p_{f(s)}
+            q_tilde_f_s_term = (q.get(op_f_s.id, 0) + get_safe_proc_time(op_f_s)) if op_f_s else 0
+            # q̃_t + p_t
+            q_tilde_t_term = q.get(op_t.id, 0) + get_safe_proc_time(op_t)
+
+            q_tilde_s = max(q_tilde_f_s_term, q_tilde_t_term)
+            q_hat_k = q.get(op_k.id, 0) - q_s + q_tilde_s
+
+        # combine all to calculate LB1
+        r_hat_j_term = r_hat_j + get_safe_proc_time(op_j)
+        q_hat_k_term = q_hat_k + get_safe_proc_time(op_k)
         
-        # --- Lower Bound LB1 (Theorem 5, Section 6.3) ---
-        r_hat_j = r.get(j_op.id, 0)
-        # check if i in P(j)
-        if j_op and self.graph.path_exists(op_to_move, j_op):
-            r_t = r.get(t_op.id, 0)
-            r_p_t = (r.get(t_op.job_prev.id, 0) + t_op.job_prev.get_processing_time()) if t_op.job_prev else 0
-            r_s = (r.get(s_op.id, 0) + s_op.get_processing_time()) if s_op.id != 'source' else 0
-            r_hat_j = r.get(j_op.id, 0) - r_t + max(r_p_t, r_s)
-        
-        q_hat_k = q.get(k_op.id, 0)
-        # check if i in F(k)
-        if k_op and self.graph.path_exists(k_op, op_to_move):
-            q_s = q.get(s_op.id, 0)
-            q_f_s = (q.get(s_op.job_next.id, 0) + s_op.job_next.get_processing_time()) if s_op.job_next else 0
-            q_t = (q.get(t_op.id, 0) + t_op.get_processing_time()) if t_op.id != 'sink' else 0
-            q_hat_k = q.get(k_op.id, 0) - q_s + max(q_f_s, q_t)
-        
-        r_hat_j_term = (r_hat_j + j_op.get_processing_time()) if j_op_id != 'source' else 0
-        q_hat_k_term = (q_hat_k + k_op.get_processing_time()) if k_op_id != 'sink' else 0
         lb1 = max(r_p_term, r_hat_j_term) + p_i_prime + max(q_f_term, q_hat_k_term)
+
+        # LB2 (Remark 1)
+        # r_s + p_s + p_t + q_t
+        p_s = get_safe_proc_time(op_s)
+        p_t = get_safe_proc_time(op_t)
+        lb2 = r.get(op_s.id, 0) + p_s + p_t + q.get(op_t.id, 0)
         
-        # --- Lower Bound LB2 (Remark 1, Section 6.3) ---
-        p_s = s_op.get_processing_time() if s_op.id != 'source' else 0
-        p_t = t_op.get_processing_time() if t_op.id != 'sink' else 0
-        lb2 = r.get(s_op.id, 0) + p_s + p_t + q.get(t_op.id, 0)
+        # Theorem 4 (to rank move)
+        # max(r_{p(i)} + p_{p(i)}, r_j + p_j) + p'_i + max(q_{f(i)} + p_{f(i)}, q_k + p_k)
+        r_j_term = r.get(op_j.id, 0) + get_safe_proc_time(op_j)
+        q_k_term = q.get(op_k.id, 0) + get_safe_proc_time(op_k)
+        theorem4_value = max(r_p_term, r_j_term) + p_i_prime + max(q_f_term, q_k_term)
+
+        return {'theorem4_value': theorem4_value, 'final_lb': max(lb1, lb2)}        
         
-        return {'theorem4_value': theorem4_value, 'final_lb': max(lb1, lb2)}

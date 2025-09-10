@@ -11,6 +11,7 @@ class _DirectedGraph:
     - Adding nodes and edges
     - Topological sorting
     - Calculating longest paths from a given start node
+    - Explicit cycle detection using DFS
     Note: This class is designed to be used as a utility within the DisjunctiveGraph class.
     """
 
@@ -26,6 +27,33 @@ class _DirectedGraph:
         self.add_node(node_from)
         self.add_node(node_to)
 
+    def _has_cycle_dfs_util(self, node, visited, recursion_stack):
+        visited.add(node)
+        recursion_stack.add(node)
+
+        for neighbor in self.__adjacency.get(node, []):
+            if neighbor not in visited:
+                if self._has_cycle_dfs_util(neighbor, visited, recursion_stack):
+                    return True
+            elif neighbor in recursion_stack:
+                return True
+        
+        recursion_stack.remove(node)
+        return False
+
+    def has_cycle_dfs(self) -> bool:
+        """
+        Purpose: detect cycles in the graph using DFS.
+        """
+        visited = set()
+        recursion_stack = set()
+        for node in self.__nodes:
+            if node not in visited:
+                if self._has_cycle_dfs_util(node, visited, recursion_stack):
+                    # print(f"Cycle detected starting from node checks related to: {node}")
+                    return True
+        return False
+    
     def topological_sort(self) -> list:
         in_degrees = {node: 0 for node in self.__nodes}
         for node_list in self.__adjacency.values():
@@ -43,7 +71,6 @@ class _DirectedGraph:
                 if in_degrees[adj_node] == 0:
                     queue.append(adj_node)
 
-        # if the number of nodes in the topological order is not equal to total nodes, there is a cycle
         if len(res) != len(self.__nodes):
             return None # graph has cycles
         return res
@@ -54,16 +81,19 @@ class _DirectedGraph:
         Inputs:
         - start_node: the node to start from
         - weight_func: a function that takes a node and returns its weight (processing time)
-        Returns: dict {node: longest_path_length} or None if graph has cycles?
+        Returns: dict {node: longest_path_length} or None if graph has cycles
         Logic:
-        1. do a topological sort of the graph.
-        2. use dynamic programming to calculate longest paths.
-        3. return the longest path lengths. or None if graph has cycles.
+        1. use DFS to check for cycles. If cycles exist, return None.
+        2. perform topological sort to get a linear ordering of nodes.
+        3. relax edges in topological order to find longest paths.
         """
-        sorted_nodes = self.topological_sort()
+        if self.has_cycle_dfs():
+            #print("DFS detected a cycle in the graph!")
+            return None
 
-        if not sorted_nodes:
-            #print("Graph has cycles when calculating longest paths!")
+        sorted_nodes = self.topological_sort()
+        if not sorted_nodes: 
+            #print("Graph has cycles (detected by topological sort)!")
             return None # graph has cycles
 
         dist = {node: float('-inf') for node in self.__nodes}
@@ -167,20 +197,25 @@ class DisjunctiveGraph:
             reverse_graph.add_edge(op, job_pred)
             
             # machine constraints
-            machine_pred = op.machine_prev if op.machine_prev else self.source
-            forward_graph.add_edge(machine_pred, op)
-            reverse_graph.add_edge(op, machine_pred)
+            if op.machine_prev:
+                forward_graph.add_edge(op.machine_prev, op)
+                reverse_graph.add_edge(op, op.machine_prev)
+            else: 
+                forward_graph.add_edge(self.source, op)
+                reverse_graph.add_edge(op, self.source)
+
 
             # connect to sink if no successors
             if not op.job_next:
                 forward_graph.add_edge(op, self.sink)
                 reverse_graph.add_edge(self.sink, op)
+            
             if not op.machine_next:
                 forward_graph.add_edge(op, self.sink)
                 reverse_graph.add_edge(self.sink, op)
 
-        # NOTE: below is calculating release times (r_i) using forward graph
 
+        # NOTE: below is calculating release times (r_i) using forward graph
         weight_func = lambda op: op.get_processing_time() 
         r_times_raw = forward_graph.calculate_all_longest_paths(self.source, weight_func)
 
@@ -193,12 +228,7 @@ class DisjunctiveGraph:
         self.makespan = self.release_times.get(self.sink.id, 0)
         
         # NOTE: below is calculating delivery times (q_i) using reverse graph
-        # Because the weight in reverse graph should be the weight of the edge's end node, 
-        # which means the processing time of that node.
-        # reverse graph is from sink to source, edge (u,v) weight is the processing time of v
-        # so when we calculate, we need to use the op_map to get the processing time of the end node
-
-        rev_weight_func = lambda op: self.op_map[op.id].get_processing_time()
+        rev_weight_func = lambda op: self.op_map[op.id].get_processing_time() if op.id in self.op_map else 0
         q_times_raw = reverse_graph.calculate_all_longest_paths(self.sink, rev_weight_func)
         
         if q_times_raw is None: # graph has cycles

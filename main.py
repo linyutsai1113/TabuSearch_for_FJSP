@@ -57,6 +57,72 @@ def parse_jssp_instance(filepath):
     return jobs, num_machines
 
 
+def parse_fjsp_instance(filepath):
+    """
+    Purpose: parse a FJSP instance file.
+    Input: filepath - path to the instance file
+    Output: 
+    - jobs - list of Job objects
+    - num_machines - number of machines
+    Note: Example for FJSP instance
+    - first row: [job number] [machine number] (optional: average number of machines per operation)
+    - follow row represent each job:
+      - first number (n_ops): number of operations in this job
+      - then according to k, there are k pairs of numbers (machine,processing time) that specify which are the machines and the processing times 
+
+    Example: Fisher and Thompson 6x6 instance, alternate name (mt06)
+
+    ```
+    6   6   1   
+    6   1   3   1   1   1   3   1   2   6   1   4   7   1   6   3   1   5   6   
+    6   1   2   8   1   3   5   1   5   10  1   6   10  1   1   10  1   4   4   
+    6   1   3   5   1   4   4   1   6   8   1   1   9   1   2   1   1   5   7   
+    6   1   2   5   1   1   5   1   3   5   1   4   3   1   5   8   1   6   9   
+    6   1   3   9   1   2   3   1   5   5   1   6   4   1   1   3   1   4   1   
+    6   1   2   3   1   4   3   1   6   9   1   1   10  1   5   4   1   3   1   
+    ```
+
+    first row: 6 jobs, 6 machines, and 1 machine per operation  
+    second row: job 1 has 6 operations; the first operation can be processed by 1 machine, that is machine 3 with processing time 1.
+
+    """
+    with open(filepath, 'r') as f:
+        lines = [line.strip() for line in f if line.strip()]
+
+    first_line_tokens = lines[0].split()
+    num_jobs = int(first_line_tokens[0])
+    num_machines = int(first_line_tokens[1])
+
+    jobs = []
+    for job_index, line in enumerate(lines[1:1 + num_jobs]):
+        tokens = list(map(int, line.split()))
+        
+        operations = []
+        num_ops = tokens[0]
+        
+        token_ptr = 1 
+        for op_index in range(num_ops):
+            op_id = f"{job_index + 1}-{op_index + 1}"
+            
+            num_machine_options = tokens[token_ptr]
+            token_ptr += 1
+            
+            processing_times = {}
+            for _ in range(num_machine_options):
+                machine_id = tokens[token_ptr]
+                processing_time = tokens[token_ptr + 1]
+                processing_times[machine_id] = processing_time
+                token_ptr += 2
+            
+            op = Operation(op_id, job_index + 1, processing_times)
+            operations.append(op)
+        
+        job = Job(job_index + 1, operations)
+        jobs.append(job)
+
+    return jobs, num_machines
+
+
 def main():
     """
     Purpose: main function to set up the problem instance and run the Tabu Search algorithm.
@@ -68,10 +134,16 @@ def main():
     """
     print("--- Setting a Problem instance ---")
 
-    jobs, num_machines = parse_jssp_instance('git-repos/jsp_framework/jsp/benchmark/instances/la04')
-    print(f"Instance define completed: {len(jobs)} jobs, {num_machines} machines.")
+    # fjsp instance
+    filepath = 'git-repos/TabuSearch_for_FJSP/benchmark/fjs_data/Hurink/Hurink_edata_la02.fjs' 
+    jobs, num_machines = parse_fjsp_instance(filepath)
+    
+    # jssp instance
+    # filepath = 'benchmark/instances/la02'
+    # jobs, num_machines = parse_jssp_instance(filepath)
 
-    # generate an initial solution
+    print(f"Instance '{filepath}' define completed: {len(jobs)} jobs, {num_machines} machines.")
+
     print("\n--- Generating a initial solution ---")
     initial_solution = generate_initial_solution(jobs, num_machines)
     print("\nInitial solution:")
@@ -79,11 +151,11 @@ def main():
         print(f"  Machine {m_id}: {ops}")
 
     # run Tabu Search
-    solver = TabuSearchSolver(jobs, num_machines, max_iter_no_improve=1000)
+    solver = TabuSearchSolver(jobs, num_machines, max_iter_no_improve=2000)
     
     # measure time
     start_time = time.time()
-    best_solution, best_makespan = solver.solve(initial_solution, max_iterations=1000)
+    best_solution, best_makespan = solver.solve(initial_solution, max_iterations=20000)
     end_time = time.time()
 
     print(f"\nThe best Makespan: {best_makespan}")
